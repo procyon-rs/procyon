@@ -56,7 +56,7 @@ impl Into<vega_lite_3::YClass> for EncodingAxis {
     fn into(self) -> vega_lite_3::YClass {
         match self {
             EncodingAxis::Field(field_name) => vega_lite_3::YClassBuilder::default()
-                .field(field_name.to_string())
+                .field(field_name)
                 .def_type(vega_lite_3::StandardType::Quantitative)
                 .build()
                 .unwrap(),

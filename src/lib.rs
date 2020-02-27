@@ -1,9 +1,14 @@
-use vega_lite_3;
-pub use vega_lite_3::Showable;
+pub use showata::Showable;
+
+#[cfg(feature = "vega_lite_4")]
+mod vega_lite_4_bindings;
+
+#[cfg(feature = "vega_lite_3")]
+mod vega_lite_3_bindings;
 
 pub struct Procyon {
     data: Data,
-    mark: vega_lite_3::Mark,
+    mark: Mark,
     encode_x: Option<EncodingAxis>,
     encode_y: Option<EncodingAxis>,
     encode_color: Option<EncodingCondition>,
@@ -13,16 +18,6 @@ pub struct Procyon {
 #[derive(Clone)]
 pub enum Data {
     Url(String),
-}
-impl Into<vega_lite_3::Data> for Data {
-    fn into(self) -> vega_lite_3::Data {
-        match self {
-            Data::Url(url) => vega_lite_3::DataBuilder::default()
-                .url(url)
-                .build()
-                .unwrap(),
-        }
-    }
 }
 impl From<&str> for Data {
     fn from(value: &str) -> Self {
@@ -41,28 +36,6 @@ impl From<&str> for EncodingAxis {
         EncodingAxis::Field(value.to_string())
     }
 }
-impl Into<vega_lite_3::XClass> for EncodingAxis {
-    fn into(self) -> vega_lite_3::XClass {
-        match self {
-            EncodingAxis::Field(field_name) => vega_lite_3::XClassBuilder::default()
-                .field(field_name)
-                .def_type(vega_lite_3::StandardType::Quantitative)
-                .build()
-                .unwrap(),
-        }
-    }
-}
-impl Into<vega_lite_3::YClass> for EncodingAxis {
-    fn into(self) -> vega_lite_3::YClass {
-        match self {
-            EncodingAxis::Field(field_name) => vega_lite_3::YClassBuilder::default()
-                .field(field_name)
-                .def_type(vega_lite_3::StandardType::Quantitative)
-                .build()
-                .unwrap(),
-        }
-    }
-}
 
 #[derive(Clone)]
 pub enum EncodingCondition {
@@ -73,24 +46,18 @@ impl From<&str> for EncodingCondition {
         EncodingCondition::Field(value.to_string())
     }
 }
-impl Into<vega_lite_3::ValueDefWithConditionMarkPropFieldDefStringNull> for EncodingCondition {
-    fn into(self) -> vega_lite_3::ValueDefWithConditionMarkPropFieldDefStringNull {
-        match self {
-            EncodingCondition::Field(field_name) => {
-                vega_lite_3::ValueDefWithConditionMarkPropFieldDefStringNullBuilder::default()
-                    .field(vega_lite_3::Field::String(field_name))
-                    .build()
-                    .unwrap()
-            }
-        }
-    }
+
+#[derive(Clone)]
+enum Mark {
+    Line,
+    Point,
 }
 
 impl Procyon {
     pub fn chart(data: impl Into<Data>) -> Self {
         Self {
             data: data.into(),
-            mark: vega_lite_3::Mark::Line,
+            mark: Mark::Line,
             encode_x: None,
             encode_y: None,
             encode_color: None,
@@ -99,7 +66,7 @@ impl Procyon {
 
     pub fn mark_point(&mut self) -> &mut Self {
         let mut new = self;
-        new.mark = vega_lite_3::Mark::Point;
+        new.mark = Mark::Point;
 
         new
     }
@@ -123,21 +90,13 @@ impl Procyon {
         new
     }
 
-    pub fn build(&self) -> vega_lite_3::Vegalite {
-        let mut builder = &mut vega_lite_3::VegaliteBuilder::default();
-        builder = builder.data(self.data.clone()).mark(self.mark.clone());
-        let mut encoding_builder = &mut vega_lite_3::EncodingBuilder::default();
-        if let Some(x) = self.encode_x.clone() {
-            encoding_builder = encoding_builder.x(x);
-        }
-        if let Some(y) = self.encode_y.clone() {
-            encoding_builder = encoding_builder.y(y);
-        }
-        if let Some(color) = self.encode_color.clone() {
-            encoding_builder = encoding_builder.color(color);
-        }
-        builder = builder.encoding(encoding_builder.build().unwrap());
+    #[cfg(feature = "vega_lite_4")]
+    pub fn build(&self) -> vega_lite_4::Vegalite {
+        self.build_v4()
+    }
 
-        builder.build().unwrap()
+    #[cfg(all(not(feature = "vega_lite_4"), feature = "vega_lite_3"))]
+    pub fn build(&self) -> vega_lite_3::Vegalite {
+        self.build_v3()
     }
 }

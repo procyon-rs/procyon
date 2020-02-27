@@ -59,6 +59,7 @@ impl Into<vega_lite_4::DefWithConditionMarkPropFieldDefGradientStringNull>
 }
 
 impl crate::Procyon {
+    /// Build the graph as a vega_lite_4 spec
     pub fn build_v4(&self) -> vega_lite_4::Vegalite {
         let mut builder = &mut vega_lite_4::VegaliteBuilder::default();
         builder = builder.data(self.data.clone()).mark(self.mark.clone());

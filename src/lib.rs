@@ -1,10 +1,10 @@
 //! High level helpers to create beautiful graphs based on Vega-Lite
 
-// warnings,
 #![deny(
     missing_debug_implementations,
     trivial_casts,
     trivial_numeric_casts,
+    warnings,
     unsafe_code,
     unstable_features,
     unused_import_braces,
@@ -13,15 +13,80 @@
 )]
 
 pub use showata::Showable;
-//
+
 use base64;
+use data_url::DataUrl;
 use fantoccini::{Client, Locator};
-use retry::{delay::Fixed, retry, OperationResult};
+use retry::{delay::Exponential, retry_with_index, OperationResult};
+//use futures_retry::{RetryPolicy, StreamRetryExt};
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 use std::process::Command;
-use std::{thread, time};
+
+/// Spawn in background a webdriver, currently support is limited to
+/// geckodriver. Please see [geckodriver doc](https://github.com/mozilla/geckodriver) and install it.
+/// TODO: allow [chromium webdriver](https://chromedriver.chromium.org/) and update documentation
+pub fn spawn_webdriver(
+    webdriver_name: &str,
+    port: Option<u64>,
+) -> Result<(std::process::Child, u64), Box<dyn std::error::Error>> {
+    let mut try_port = match port {
+        Some(n) => n,
+        None => 4444,
+    };
+    let webdriver_process = retry_with_index(Exponential::from_millis(100), |current_try| {
+        if current_try > 3 {
+            return OperationResult::Err("did not succeed within 3 tries");
+        }
+        try_port += current_try;
+        let try_command = Command::new(webdriver_name)
+            .args(&["--port", &try_port.to_string()])
+            .spawn();
+        match try_command {
+            Ok(cmd) => OperationResult::Ok(cmd),
+            Err(_) => OperationResult::Retry("Trying with another port"),
+        }
+    })
+    .unwrap();
+    Ok((webdriver_process, try_port))
+}
+
+/// Create a headless browser instance.
+/// Code from : https://github.com/jonhoo/fantoccini/blob/master/tests/common.rs
+/// The chrome case will be commented for now and will be tested later.str
+/// It also need the port from the webdriver.
+pub async fn create_headless_client(
+    client_type: &str,
+    port: u64,
+) -> Result<Client, fantoccini::error::NewSessionError> {
+    //    let mut client = retry_with_index(Exponential::from_millis(100),
+    // |current_try| {        if current_try > 5 {
+    //            return OperationResult::Err("did not succeed within 3 tries");
+    //        }
+    //        let mut try_client = match client_type {
+    //            "firefox" => {
+    //                let mut caps = serde_json::map::Map::new();
+    //                let opts = serde_json::json!({ "args": ["--headless"] });
+    //                caps.insert("moz:firefoxOptions".to_string(), opts.clone());
+    //                Client::with_capabilities(&format!("http://localhost:{}", port.to_string()), caps)
+    //                    .await?
+    //            }
+    //            browser => unimplemented!("unsupported browser backend {}",
+    // browser),        };
+    //        match try_client {
+    //            Ok(try_client) => OperationResult::Ok(try_client),
+    //            Err(e) => OperationResult::Retry("Trying to establish connection
+    // between client and webdriver"),        }
+    //    }).unwrap();
+    //  Ok(client)
+    unimplemented!(
+        "Currently trying to find out how retry_futures works {} {}",
+        client_type,
+        port
+    )
+}
+
 #[cfg(feature = "vega_lite_4")]
 mod vega_lite_4_bindings;
 
@@ -123,57 +188,22 @@ impl Procyon {
 
         new
     }
-    /// save the image
+
+    /// Current implem use the saved html by showata and imitate user clik to
+    /// save the image Another approach is to updated the embeded js like in
+    /// altair: https://github.com/altair-viz/altair_saver/blob/master/altair_saver/savers/_selenium.py
     pub async fn save(&self, image_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
-        // Spawn in background a webdriver
-        // Currently geckodriver is hardcoded but should support
-        // all webdriver compliant driver.
-        // TODO:updated to all webdriver
-        let mut webdriver_process = Command::new("geckodriver")
-            .args(&["--port", "4444"])
-            .spawn()
-            .expect("webdriver failed to start");
-        // This should also be TODO:updated to all webdriver
-        let mut caps = serde_json::map::Map::new();
-        let opts = serde_json::json!({ "args": ["--headless"]});
-        caps.insert("moz:firefoxOptions".to_string(), opts);
+        let (mut webdriver_process, webdriver_port) =
+            spawn_webdriver("geckodriver", Some(4444)).unwrap();
+        let mut client = create_headless_client("firefox", webdriver_port).await?;
+        client
+            .goto(&format!(
+                "file:///private{}",
+                self.build().to_html_file()?.to_str().unwrap()
+            ))
+            .await?;
 
-        let mut connection_ok = false;
-        while !connection_ok {
-            thread::sleep(time::Duration::from_secs(5));
-            // This should also be TODO:updated to all webdriver
-            let mut caps = serde_json::map::Map::new();
-            let opts = serde_json::json!({ "args": ["--headless"]});
-            caps.insert("moz:firefoxOptions".to_string(), opts);
-            let mut connection_ok = Client::with_capabilities("http://localhost:4444", caps)
-                .await
-                .is_err();
-            if connection_ok == false {
-                break;
-            };
-        }
-        let mut c = Client::with_capabilities("http://localhost:4444", caps).await?;
-        // let mut c = retry(Fixed::from_millis(100), || {
-        //     match Some(c.as_ref().unwrap()) {
-        //         Some(Client { tx, is_legacy }) => OperationResult::Ok(c),
-        //         _ => OperationResult::Retry("not connected yet"),
-        //     }
-        // })
-        // .unwrap()?;
-
-        //.expect("failed to connect to WebDriver");
-
-        // Current implem use the saved html by showata and imitate user clik to save the image
-        // Another approach is to updated the embeded js like in altair:
-        // https://github.com/altair-viz/altair_saver/blob/master/altair_saver/savers/_selenium.py
-        dbg!(self.build().to_html_file()?.to_str().unwrap());
-        c.goto(&format!(
-            "file:///private{}",
-            self.build().to_html_file()?.to_str().unwrap()
-        ))
-        .await?;
-        // c.goto("file:///private/var/folders/32/h6lt_67s75g6jf3h4hx_myxc0000gn/T/showata/show-1587655243189631000.html").await?;
-        let mut summary_button = c
+        let mut summary_button = client
             .wait_for_find(Locator::Css("summary"))
             .await?
             .click()
@@ -188,19 +218,16 @@ impl Procyon {
             .find(Locator::LinkText("Save as PNG"))
             .await?
             .attr("href")
-            .await?;
+            .await?
+            .unwrap();
 
-        let image_data_url = link.unwrap();
-        //let data64: Vec<&str> = image_data_url.split(',').collect::<Vec<&str>>();
-        //dbg!(data64[1]);
-        //let bytes: Vec<u8> = base64::decode(data64[1]).unwrap();
-        // "png;base64,iVB"
-        let _format = &image_data_url[11..14];
-        let bytes: Vec<u8> = base64::decode(&image_data_url[22..]).unwrap();
+        let image_data_url = DataUrl::process(&link).unwrap();
+        let (body, _) = image_data_url.decode_to_vec().unwrap();
+        let bytes: Vec<u8> = base64::decode(&body).unwrap();
         let mut image_file = File::create(image_path).unwrap();
         image_file.write(&bytes).unwrap();
-        hidden_link.close().await;
-        webdriver_process.kill();
+        hidden_link.close().await?;
+        webdriver_process.kill()?;
         Ok(())
     }
     /// Build the graph
